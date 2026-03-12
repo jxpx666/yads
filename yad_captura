@@ -1,0 +1,376 @@
+#!/bin/bash
+
+APP="CaptureKit"
+
+BASE="$HOME/Imagens/Capturas"
+IMG="$BASE/screenshots"
+VID="$BASE/videos"
+AUD="$BASE/audio"
+CAM="$BASE/webcam"
+GIF="$BASE/gifs"
+
+mkdir -p "$IMG" "$VID" "$AUD" "$CAM" "$GIF"
+
+notify(){
+notify-send "$APP" "$1"
+}
+
+################################
+# GRAVAÇÃO COM STOP + CONTADOR
+################################
+record_with_stop(){
+
+OUTFILE="$1"
+shift
+
+ffmpeg "$@" "$OUTFILE" &
+PID=$!
+
+yad --title="🔴 Gravando" \
+--text="Gravação em andamento\n\nClique em PARAR para finalizar." \
+--button="Parar":0 \
+--center \
+--width=250 \
+--height=100
+
+kill -INT $PID 2>/dev/null
+wait $PID 2>/dev/null
+
+notify-send "CaptureKit" "Gravação finalizada"
+
+}
+################################
+# SCREENSHOT
+################################
+
+screenshot_menu(){
+
+MODE=$(yad --list \
+--title="Screenshot (scrot completo)" \
+--column="Modo" \
+"Tela inteira" \
+"Selecionar área" \
+"Janela ativa" \
+"Janela selecionada" \
+"Multi-monitor" \
+"Com cursor" \
+"Sem cursor" \
+"Com borda da janela" \
+"Delay 5s" \
+"Delay customizado" \
+"Contagem regressiva" \
+"Freeze tela antes captura" \
+"Thumbnail automática" \
+"Alta qualidade" \
+"Tela inteira → Clipboard" \
+"Área → Clipboard" \
+"Janela ativa → Clipboard" \
+"Abrir no viewer após captura" \
+"Editar no GIMP após captura" \
+--height=450 --width=380 | cut -d'|' -f1)
+
+FILE="$IMG/screen_$(date +%F_%H%M%S).png"
+
+case "$MODE" in
+
+"Tela inteira")
+scrot "$FILE"
+;;
+
+"Selecionar área")
+scrot -s "$FILE"
+;;
+
+"Janela ativa")
+scrot -u "$FILE"
+;;
+
+"Janela selecionada")
+scrot -s -u "$FILE"
+;;
+
+"Multi-monitor")
+scrot -m "$FILE"
+;;
+
+"Com cursor")
+scrot -p "$FILE"
+;;
+
+"Sem cursor")
+scrot "$FILE"
+;;
+
+"Com borda da janela")
+scrot -u -b "$FILE"
+;;
+
+"Delay 5s")
+scrot -d 5 "$FILE"
+;;
+
+"Delay customizado")
+
+SEC=$(yad --entry --title="Delay" --text="Segundos:")
+[ -n "$SEC" ] && scrot -d "$SEC" "$FILE"
+;;
+
+"Contagem regressiva")
+
+SEC=$(yad --entry --title="Contagem regressiva" --text="Segundos:")
+[ -n "$SEC" ] && scrot -c -d "$SEC" "$FILE"
+;;
+
+"Freeze tela antes captura")
+scrot -f -s "$FILE"
+;;
+
+"Thumbnail automática")
+scrot "$FILE" -t 200x200
+;;
+
+"Alta qualidade")
+scrot -q 100 "$FILE"
+;;
+
+"Tela inteira → Clipboard")
+scrot -e 'xclip -selection clipboard -t image/png < $f'
+notify "Screenshot copiado"
+return
+;;
+
+"Área → Clipboard")
+scrot -s -e 'xclip -selection clipboard -t image/png < $f'
+notify "Screenshot copiado"
+return
+;;
+
+"Janela ativa → Clipboard")
+scrot -u -e 'xclip -selection clipboard -t image/png < $f'
+notify "Screenshot copiado"
+return
+;;
+
+"Abrir no viewer após captura")
+scrot "$FILE" -e 'sxiv $f'
+;;
+
+"Editar no GIMP após captura")
+scrot "$FILE" -e 'gimp $f'
+;;
+
+esac
+
+notify "Screenshot salvo: $FILE"
+
+}
+
+################################
+# SCREEN RECORD
+################################
+
+screen_menu(){
+
+MODE=$(yad --list \
+--title="Gravação de Tela" \
+--column="Modo" \
+"Tela inteira" \
+"Área selecionada" \
+"Tela + Microfone" \
+"Gravar GIF" \
+--height=300 --width=300 | cut -d'|' -f1)
+
+case "$MODE" in
+
+"Tela inteira")
+
+FILE="$VID/video_$(date +%F_%H%M%S).mkv"
+
+record_with_stop "$FILE" \
+-video_size 1920x1080 \
+-framerate 30 \
+-f x11grab \
+-i "$DISPLAY"
+;;
+
+"Área selecionada")
+
+read X Y W H <<< $(slop -f "%x %y %w %h")
+
+FILE="$VID/area_$(date +%F_%H%M%S).mkv"
+
+record_with_stop "$FILE" \
+-f x11grab \
+-video_size ${W}x${H} \
+-i "$DISPLAY+$X,$Y"
+;;
+
+"Tela + Microfone")
+
+FILE="$VID/screen_audio_$(date +%F_%H%M%S).mkv"
+
+record_with_stop "$FILE" \
+-f x11grab -i "$DISPLAY" \
+-f pulse -i default
+;;
+
+"Gravar GIF")
+
+FILE="$GIF/gif_$(date +%F_%H%M%S).gif"
+
+record_with_stop "$FILE" \
+-f x11grab \
+-r 10 \
+-i "$DISPLAY"
+;;
+
+esac
+
+}
+
+################################
+# MICROFONE
+################################
+
+mic_record(){
+
+FILE="$AUD/audio_$(date +%F_%H%M%S).wav"
+
+record_with_stop "$FILE" \
+-f pulse -i default
+
+}
+
+################################
+# WEBCAM
+################################
+
+webcam_menu(){
+
+MODE=$(yad --list \
+--title="Webcam" \
+--column="Modo" \
+"Foto" \
+"Gravar vídeo" \
+"Preview" \
+--height=300 --width=300 | cut -d'|' -f1)
+
+case "$MODE" in
+
+"Foto")
+
+FILE="$CAM/webcam_$(date +%F_%H%M%S).jpg"
+
+ffmpeg -f v4l2 -i /dev/video0 -vframes 1 "$FILE"
+
+notify "Foto salva"
+;;
+
+"Gravar vídeo")
+
+FILE="$CAM/webcam_$(date +%F_%H%M%S).mkv"
+
+record_with_stop "$FILE" \
+-f v4l2 \
+-i /dev/video0
+;;
+
+"Preview")
+
+mpv av://v4l2:/dev/video0
+;;
+
+esac
+
+}
+
+################################
+# OCR
+################################
+
+ocr_screen(){
+
+TMP="/tmp/ocr.png"
+
+scrot -s "$TMP"
+
+TEXT=$(tesseract "$TMP" stdout)
+
+echo "$TEXT" | xclip -selection clipboard
+
+yad --text-info \
+--title="OCR Resultado" \
+--width=600 \
+--height=400 \
+--filename=<(echo "$TEXT")
+
+}
+
+################################
+# BARCODE
+################################
+
+barcode_scan(){
+
+TMP="/tmp/barcode.png"
+
+scrot -s "$TMP"
+
+RESULT=$(zbarimg "$TMP")
+
+yad --info \
+--title="Resultado" \
+--text="$RESULT"
+
+}
+
+################################
+# ABRIR PASTA BASE
+################################
+
+open_base(){
+
+xdg-open "$BASE"
+
+}
+
+################################
+# MENU PRINCIPAL
+################################
+
+menu(){
+
+yad --title="$APP" \
+--width=400 \
+--height=320 \
+--center \
+--form \
+--columns=1 \
+--field="📸 Screenshot:FBTN" "$0 screenshot" \
+--field="🎥 Gravar Tela:FBTN" "$0 screen" \
+--field="🎙️ Microfone:FBTN" "$0 mic" \
+--field="📷 Webcam:FBTN" "$0 webcam" \
+--field="🔎 OCR Tela:FBTN" "$0 ocr" \
+--field="📦 Barcode/QR:FBTN" "$0 barcode" \
+--field="📂 Abrir Capturas:FBTN" "$0 openbase" \
+--button="Fechar":0
+
+}
+
+################################
+# ARGUMENTOS
+################################
+
+case "$1" in
+
+screenshot) screenshot_menu ;;
+screen) screen_menu ;;
+mic) mic_record ;;
+webcam) webcam_menu ;;
+ocr) ocr_screen ;;
+barcode) barcode_scan ;;
+openbase) open_base ;;
+*) menu ;;
+
+esac
+

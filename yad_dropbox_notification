@@ -1,0 +1,91 @@
+#!/bin/bash
+##############################################################################
+# NOME       : (Yet Another) Dropbox Tray Icon Indicator
+# VERSÃO     : 1.0
+# DESCRIÇÃO  : Ícone de bandeja com status e menu Dropbox
+# AUTOR      : Seu Nome (opcional)
+# LICENÇA    : CC0 / MIT / WTFPL (escolha sua peste)
+# STATUS     : teste
+# DEPENDÊNCIAS:
+#    - listar comandos externos necessários (xrandr, sed, awk...)
+###############################################################################
+
+ICON_DIR="$HOME/.icons"
+INTERVAL=5
+TITLE="Dropbox Status"
+
+command -v dropbox-cli >/dev/null || { notify-send "$TITLE" "dropbox-cli não encontrado"; exit 1; }
+
+# === YAD no pipe ===
+exec 3> >(yad --notification --listen \
+    --image="$ICON_DIR/dropboxstatus-desconhecido.png" \
+    --text="$TITLE" \
+    --tooltip="Monitorando Dropbox..." \
+    --command="show_full_status")
+
+notify_yad() { echo "$1" >&3; }
+
+show_full_status() {
+    STATUS="$(dropbox-cli status 2>/dev/null)"
+    [ -z "$STATUS" ] && STATUS="Dropbox não está rodando!"
+    yad --text-info --title="Dropbox Status Completo" --width=500 --height=300 <<< "$STATUS"
+}
+
+SEPARATOR="──────────"
+
+HEADERMENU="📁 Pasta!zzzfm -r ~/Dropbox!folder|🌐 WebSite!$BROWSER https://www.dropbox.com/!network-server|🔗 Compartilhar Link!dropbox-cli sharelink ~/Dropbox!emblem-shared|⚙️ Preferências Proxy!dropbox-cli proxy status!preferences-system"
+
+DAEMONMENU="🔘 Daemon ▸ Toggle !bash -c 'if pgrep -f dropbox >/dev/null; then dropbox-cli stop; notify-send \"Dropbox Daemon\" \"⏹ Parado\"; else dropbox-cli start; notify-send \"Dropbox Daemon\" \"▶️ Iniciado\"; fi'!system-run|🔄 Daemon ▸ Restart!bash -c 'dropbox-cli stop; sleep 1; dropbox-cli start; notify-send \"Dropbox Daemon\" \"🔄 Reiniciado\";'!view-refresh|Daemon ▸ Status!show_full_status!dialog-information"
+
+INDICMENU="✏️ Edit Script!micro /home/jxpx/.bin/dropboxstatus!edit|🚪 Exit!exit!application-exit"
+
+make_fullmenu() { echo "$HEADERMENU|$SEPARATOR|$DAEMONMENU|$SEPARATOR|$INDICMENU"; }
+
+update_tray() {
+    notify_yad "icon:$1"
+    notify_yad "tooltip:$2"
+    notify_yad "action:$3"
+    notify_yad "menu:$4"
+}
+
+LAST_STATUS=""
+
+while true; do
+    STATUS="$(dropbox-cli status 2>/dev/null)"
+    [ -z "$STATUS" ] && STATUS="Dropbox não está rodando!"
+
+    if [ "$STATUS" != "$LAST_STATUS" ]; then
+        LAST_STATUS="$STATUS"
+
+        case "$STATUS" in
+            "Atualizado"*)
+                update_tray "$ICON_DIR/dropboxstatus-atualizado.png" "Dropbox Atualizado" "show_full_status" "$(make_fullmenu)"
+                ;;
+            "Conectando..."*)
+                update_tray "$ICON_DIR/dropboxstatus-conectando.png" "$STATUS" "show_full_status" "$HEADERMENU"
+                ;;
+            "Iniciando..."*)
+                update_tray "$ICON_DIR/dropboxstatus-iniciando.png" "$STATUS" "show_full_status" "$HEADERMENU"
+                ;;
+            "Sincronizando..."*|*"Downloading"*|*"Uploading"*)
+                update_tray "$ICON_DIR/dropboxstatus-baixando.png" "$STATUS" "show_full_status" "$HEADERMENU"
+                ;;
+            "Dropbox isn't running!"*)
+                update_tray "$ICON_DIR/dropboxstatus-desconectado.png" "$STATUS" "show_full_status" "$DAEMONMENU"
+                ;;
+            *)
+                update_tray "$ICON_DIR/dropboxstatus-desconhecido.png" "$STATUS" "show_full_status" "$(make_fullmenu)"
+                ;;
+        esac
+    fi
+
+    if read -t 0.1 EVENT <&3; then
+        case "$EVENT" in
+            "activate") show_full_status ;;
+            "context") eval "$TRAY_MENU" ;;
+        esac
+    fi
+
+    sleep "$INTERVAL"
+done
+

@@ -1,0 +1,235 @@
+#!/bin/bash
+###############################################################################
+# X11 Widgets Launcher + bbzoom integrado
+###############################################################################
+
+# -------------------------------
+# Widget XSCT
+# -------------------------------
+widget_xsct() {
+    VAR0=$(echo $RANDOM | cut -b-4)
+    VAR1=$(xsct | awk '{print $5}')
+    VAR2=$(xsct | awk '{print $6}' | cut -d'.' -f2)
+    yad --plug=$VAR0 --tabnum=1 --text="TEMPERATURE" \
+        --scale --print-partial --value="$VAR1" --max-value=40000 --min-value=700 --enforce-step=100 | while read val; do xsct $val; done &
+    yad --plug=$VAR0 --tabnum=2 --text="BRIGHTNESS" \
+        --scale --hide-value --print-partial --value="$VAR2" --max-value=997068 --min-value=100000 --enforce-step=35000 | while read val; do xsct "$(xsct | awk '{print $5}')" 0.$val; done &
+    yad --paned --key=$VAR0 --focused=1 --orient=vert --splitter=200 \
+        --title="xsct - X11 set screen color temperature" \
+        --width=600 --height=400 \
+        --f1-action='Xcalibright' \
+        --button='Toggle Day/Night:xsct -t' \
+        --button='Xsct 0:xsct 0' \
+        --button='Xsct Preset:xsct 3700 0.9' \
+        --button='Temp -:xsct -d -500' \
+        --button='Temp +:xsct -d +500'
+}
+
+# -------------------------------
+# Widget XBRIGHTNESS
+# -------------------------------
+widget_xbrightness() {
+    VAR2=$(xbrightness | cut -d: -f1)
+    yad --text="xbrightness - brightness ramp" \
+        --scale --hide-value --print-partial --value="$VAR2" --max-value=65535 --min-value=10000 --enforce-step=3500 | while read val; do xbrightness $val; done &
+}
+
+# -------------------------------
+# Widget XCALIB
+# -------------------------------
+widget_xcalib() {
+    VAR0=$RANDOM
+    VAR3=$(xcalib -d $DISPLAY -s 0 -l -v -a | grep Contrast | cut -d: -f3 | cut -d. -f1 | awk '{print $2}')
+    yad --scale --step=3 --value="$VAR3" --max-value=99 --min-value=20 \
+        --title="$(apropos xcalib)" \
+        --text="$(apropos xcalib)" \
+        --image=xcalib \
+        --enforce-step=3 \
+        --inc-buttons \
+        --button='Clear:xcalib -clear' \
+        --print-partial | while read val; do xcalib -c && xcalib -co $val -a; done &
+}
+
+# -------------------------------
+# Widget XBACKLIGHT
+# -------------------------------
+widget_xbacklight() {
+    VAR0=$(xbacklight -get | cut -d. -f1)
+    yad --text="$(apropos xbacklight)" \
+        --title="$(whatis xbacklight)" \
+        --print-xid="$HOME/.cache/yad-backlight.xid" \
+        --f1-action='micro' \
+        --scale \
+        --step=9 \
+        --inc-buttons \
+        --mark='Default:18' \
+        --button='Default:$(xbacklight -set 18 & xmessage)' \
+        --value="$VAR0" --max-value=100 --min-value=5 \
+        --print-partial | while read val; do xbacklight -set $val.00; done &
+}
+
+# -------------------------------
+# Widget TRANSSET
+# -------------------------------
+widget_transset() {
+    yad --text="Transset" \
+        --form \
+        --field=:SCL '75' \
+        --field="Client:CB" "$(xdotool search --desktop "$(xdotool get_desktop)" . getwindowname "%@" | awk '{printf "!"$0}')" \
+        --field="Execute Trans:BTN" 'sh -c "transset -n %2 0.$(echo %1 / 100 | bc -l)"' \
+        --field="Separator:LBL" '' \
+        --field="Select Window (Scale):BTN" 'sh -c "transset $(echo %1 / 100 | bc -l)"' \
+        --field="Select Window (Toggle):BTN" 'sh -c "transset -t"' \
+        --width=600 --height=300 &
+}
+
+# -------------------------------
+# Widget XGAMMA
+# -------------------------------
+widget_xgamma() {
+    xgamma -gamma 1.0
+    xdotool search --name Xgamma windowclose "%@" &
+    yad --text="xgamma - Adjust gamma" \
+        --title="Xgamma" \
+        --f1-action='Xcalibright' \
+        --scale \
+        --value=1000 --max-value=10000 --min-value=100 \
+        --enforce-step=100 \
+        --hide-value \
+        --print-partial \
+        --inc-buttons \
+        --button='Default:Xcalibright -g' \
+        --mark=:100 \
+        --mark=:1000 \
+        --mark=:1500 | while read val; do xgamma -gamma "$(echo "$val / 1000" | bc -l)"; done &
+}
+
+# -------------------------------
+# Widget BBZOOM
+# -------------------------------
+widget_bbzoom() {
+    BASE="$HOME/.blackbox/bbzoom"
+    LAST="$BASE/lastzoom"
+    mkdir -p "$LAST"
+
+    sanitize_name() {
+        echo "$1" | tr '-' '_'
+    }
+
+    MONITORS=$(xrandr | grep " connected" | awk '{print $1}')
+    [ -z "$MONITORS" ] && { yad --error --text="Nenhum display detectado."; return; }
+
+    # Inicializa zoom
+    for MON in $MONITORS; do
+        MON_SAFE=$(sanitize_name "$MON")
+        if [ -f "$LAST/$MON_SAFE" ]; then
+            VAL=$(cat "$LAST/$MON_SAFE")
+        else
+            VAL=100
+        fi
+        eval "PCT_$MON_SAFE=$VAL"
+    done
+
+    apply_scale() {
+        MON=$1
+        PCT=$2
+        FACTOR=$(awk "BEGIN {printf \"%.2f\", 100/$PCT}")
+        xrandr --output "$MON" --scale "${FACTOR}x${FACTOR}" >/dev/null 2>&1
+        fix_workspace "$MON"
+        MON_SAFE=$(sanitize_name "$MON")
+        eval "PCT_$MON_SAFE=$PCT"
+        echo "$PCT" > "$LAST/$MON_SAFE"
+    }
+
+    fix_workspace() {
+        MON=$1
+        RES=$(xrandr | grep "$MON connected" | grep -o '[0-9]\+x[0-9]\+')
+        xrandr --fb "$RES" >/dev/null 2>&1
+    }
+
+    reset_all() {
+        for MON in $MONITORS; do
+            apply_scale "$MON" 100
+        done
+        notify-send "🧹 Zoom resetado" "Todos os monitores voltaram para 100%"
+    }
+
+    show_hud() {
+        HUD=""
+        for MON in $MONITORS; do
+            MON_SAFE=$(sanitize_name "$MON")
+            eval "VAL=\$PCT_$MON_SAFE"
+            HUD="$HUD $MON:$VAL%"
+        done
+        notify-send "📊 bbzoom" "$HUD"
+    }
+
+    # Loop principal do HUD
+    while true; do
+        PARAMS=""
+        for MON in $MONITORS; do
+            MON_SAFE=$(sanitize_name "$MON")
+            eval "CURVAL=\$PCT_$MON_SAFE"
+            SLIDER_TEXT="$MON ($CURVAL%)"
+            PARAMS="$PARAMS --scale --title 'Zoom $MON' --text '$SLIDER_TEXT' --min-value 25 --max-value 200 --step 25 --enforce-step --inc-buttons --value $CURVAL --print-partial"
+        done
+
+        VALUES=$(eval yad $PARAMS --width=500 --height=50 --center \
+            --button "Aplicar:0" --button "Resetar 100%:1" --button "Fechar Escape:2")
+
+        RET=$?
+        case $RET in
+            0)
+                I=1
+                for MON in $MONITORS; do
+                    VAL=$(echo "$VALUES" | awk -v i=$I '{print $i}')
+                    I=$((I+1))
+                    [ -n "$VAL" ] && apply_scale "$MON" "$VAL"
+                done
+                show_hud
+                ;;
+            1) reset_all ;;
+            2|252) break ;;
+        esac
+    done
+}
+
+# -------------------------------
+# Launcher principal
+# -------------------------------
+widget_launcher() {
+    CHOICE=$(yad --title="X11 Widgets Launcher" \
+        --text="Escolha o widget que deseja abrir:" \
+        --list \
+        --column="Widget" \
+        --column="Descrição" \
+        --width=500 --height=400 \
+        --button="Cancelar":1 \
+        "xsct" "Controle de temperatura e brilho da tela" \
+        "xbrightness" "Rampas de brilho X11 via xbrightness" \
+        "xcalib" "Calibração fina de cores e contraste via xcalib" \
+        "xbacklight" "Controle de backlight via xbacklight" \
+        "transset" "Transparência de janelas via transset" \
+        "xgamma" "Ajuste de gamma via xgamma" \
+        "bbzoom" "Zoom de monitores via bbzoom")
+
+    [[ $? -ne 0 ]] && exit 0
+
+    CHOICE=$(echo "$CHOICE" | cut -d'|' -f1)
+
+    case $CHOICE in
+        "xsct")         widget_xsct & ;;
+        "xbrightness")  widget_xbrightness & ;;
+        "xcalib")       widget_xcalib & ;;
+        "xbacklight")   widget_xbacklight & ;;
+        "transset")     widget_transset & ;;
+        "xgamma")       widget_xgamma & ;;
+        "bbzoom")       widget_bbzoom & ;;
+        *)              yad --text="Widget não reconhecido!" ;;
+    esac
+}
+
+# -------------------------------
+# Executa o launcher
+# -------------------------------
+widget_launcher
